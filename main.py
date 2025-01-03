@@ -25,9 +25,10 @@ inp = input('0: Camera (real-time), 1: Video Path\n')
 if int(inp) == 0:
     videoCap = cv2.VideoCapture(0)
 else:
-    v_path = input("Path: ")
+    v_path = input("gimme a path: ")
     videoCap = cv2.VideoCapture(v_path)
 
+# videoCap = cv2.VideoCapture(0)
 yolo = YOLO('yolov8s.pt')
 
 mp_drawing = mp.solutions.drawing_utils
@@ -37,28 +38,24 @@ pose = mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5)
 
 pipe = pipeline(task = "depth-estimation", model="LiheYoung/depth-anything-small-hf")
 
-
-initial_px_height = {}
 relative_distance = {}
 left_foot_pos = {}
 right_foot_pos = {}
 left_hip_pos = {}
 right_hip_pos = {}
 
+frame_num = 0
+
 while videoCap.isOpened():
     ret, frame = videoCap.read()
     if not ret:
         continue
-    results = yolo.track(frame, stream=True)
+    results = yolo.track(frame, stream=True, persist=True)
     # Object detection and visualization code
 
     #depth detection
     image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
     depth = pipe(image)["depth"]
-
-    pose_results = None
-    mp_drawing.draw_landmarks(frame, pose_results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
-    print(pose_results.pose_world_landmarks.landmark[mp_pose.PoseLandmark.LEFT_HIP].x, pose_results.pose_world_landmarks.landmark[mp_pose.PoseLandmark.LEFT_HIP].z)
 
     people_boxes = []
     for result in results:
@@ -70,6 +67,12 @@ while videoCap.isOpened():
 
     for i in range(0, len(people_boxes)):
         box = people_boxes[i]
+        id = int(box.id.item())
+        if id not in relative_distance:
+            relative_distance[id] = {frame_num: {}}
+        else:
+            relative_distance[id][frame_num] = {}
+
         if box.conf[0] > 0.4:
             [x1, y1, x2, y2] = box.xyxy[0] # floats
             x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2) # converting to ints for pixel drawing
@@ -91,37 +94,34 @@ while videoCap.isOpened():
 
             try:
                 left_foot = pose_results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_FOOT_INDEX]
-                left_foot_pos[i] = (int(left_foot.x * width), int(left_foot.y * height))
+                left_foot_pos[id] = (int(left_foot.x * width), int(left_foot.y * height))
             except:
-                left_foot_pos[i] = (-1, -1)
+                left_foot_pos[id] = (-1, -1)
 
             try:
                 right_foot = pose_results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_FOOT_INDEX]
-                right_foot_pos[i] = (int(right_foot.x * width), int(right_foot.y * height))
+                right_foot_pos[id] = (int(right_foot.x * width), int(right_foot.y * height))
             except:
-                right_foot_pos[i] = (-1, -1)
+                right_foot_pos[id] = (-1, -1)
 
             try:
                 left_hip = pose_results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_HIP]
-                left_hip_pos[i] = (int(left_hip.x * width), int(left_hip.y * height))
+                left_hip_pos[id] = (int(left_hip.x * width), int(left_hip.y * height))
             except:
-                left_hip_pos[i] = (-1, -1)
+                left_hip_pos[id] = (-1, -1)
 
             try:
                 right_hip = pose_results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_HIP]
-                right_hip_pos[i] = (int(right_hip.x * width), int(right_hip.y * height))
+                right_hip_pos[id] = (int(right_hip.x * width), int(right_hip.y * height))
             except:
-                right_hip_pos[i] = (-1, -1)
+                right_hip_pos[id] = (-1, -1)
+
     
     for i in range(0, len(people_boxes)): # runs after all poses have been calculated
         box = people_boxes[i]
+        id = int(box.id.item())
+
         if box.conf[0] > 0.4:
-            # distance calculation based on height
-            if i not in initial_px_height or initial_px_height[i] <= 0:
-                initial_px_height[i] = y2 - y1
-            else:
-                height = y2 - y1
-                relative_distance[i] = initial_px_height[i] / height
 
             # distance calculation based on foot position
 
@@ -129,31 +129,51 @@ while videoCap.isOpened():
             ## determine that key pose landmarks are not obstructed by other people:
             left_hip_valid = True
             right_hip_valid = True
+
+            print(left_hip_pos)
+
             for j in range(0, len(people_boxes)):
                 j_box = people_boxes[j]
                 if j_box.conf[0] > 0.4:
                     [x1, y1, x2, y2] = j_box.xyxy[0] # floats
-                    if all(x < 0 for x in left_hip_pos[i]) and point_in_box(left_hip_pos[i], (x1, y1), (x2, y2)):
-                        if max(left_foot_pos[i][1], right_foot_pos[i][1]) > max(left_foot_pos[j][1], right_foot_pos[j][1]): # using feet y position to calculate who is 
+                    if all(x < 0 for x in left_hip_pos[id]) and point_in_box(left_hip_pos[id], (x1, y1), (x2, y2)):
+                        if max(left_foot_pos[id][1], right_foot_pos[id][1]) > max(left_foot_pos[j][1], right_foot_pos[j][1]): # using feet y position to calculate who is 
                             left_hip_valid = False
-                    if all(x < 0 for x in right_hip_pos[i]) and point_in_box(right_hip_pos[i], (x1, y1), (x2, y2)):
+                    if all(x < 0 for x in right_hip_pos[id]) and point_in_box(right_hip_pos[id], (x1, y1), (x2, y2)):
                         right_hip_valid = False
                     
                     if not left_hip_valid and not right_hip_valid:
                         break
             
+            if left_hip_valid and right_hip_valid:
+                relative_distance[id][frame_num]['depth-estimation'] = depth.getpixel(tuple(sum(y) / len(y) for y in zip(right_hip_pos[id], left_hip_pos[id])))
+                
             if left_hip_valid:
-                pass
+                relative_distance[id][frame_num]['depth-estimation'] = depth.getpixel(left_hip_pos[id])
             elif right_hip_valid:
-                pass
-            else:
-                pass
+                relative_distance[id][frame_num]['depth-estimation'] = depth.getpixel(right_hip_pos[id])
+            
+            # if mediapipe detected both left and right foot
+            if all(x > 0 for x in left_foot_pos[id]) and all(x > 0 for x in right_foot_pos[id]):
+                relative_distance[id][frame_num]['foot-pos'] = (left_foot_pos[id][1] + right_foot_pos[id][1]) / 2
+            elif all(x > 0 for x in left_foot_pos[id]):
+                relative_distance[id][frame_num]['foot-pos'] = left_foot_pos[id][1]
+            elif all(x > 0 for x in right_foot_pos[id]):
+                relative_distance[id][frame_num]['foot-pos'] = right_foot_pos[id][1]
 
     cv2.imshow('frame', frame)
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 
-    cv2.imshow('position', frame)
+    map = np.zeros((frame.shape[0], frame.shape[1], 3), dtype=np.uint8)
+    for object in relative_distance:
+        try:
+            cv2.circle(map, (frame.shape[0], int(relative_distance[object][frame_num]['depth-estimation']/255*frame.shape[1])), 80, (255, 255, 255), 2)
+        except:
+            pass
+    cv2.imshow('position', map)
+
+    frame_num += 1
 
 videoCap.release()
 cv2.destroyAllWindows()
