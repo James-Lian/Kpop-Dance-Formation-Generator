@@ -36,7 +36,7 @@ mp_pose = mp.solutions.pose
 pose = mp_pose
 pose = mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5)
 
-pipe = pipeline(task = "depth-estimation", model="LiheYoung/depth-anything-small-hf")
+pipe = pipeline(task = "depth-estimation", model="depth-anything/Depth-Anything-V2-Small-hf")
 
 relative_distance = {}
 left_foot_pos = {}
@@ -50,6 +50,7 @@ while videoCap.isOpened():
     ret, frame = videoCap.read()
     if not ret:
         continue
+
     results = yolo.track(frame, stream=True, persist=True)
     # Object detection and visualization code
 
@@ -67,6 +68,8 @@ while videoCap.isOpened():
 
     for i in range(0, len(people_boxes)):
         box = people_boxes[i]
+        if box.id == None:
+            continue
         id = int(box.id.item())
         if id not in relative_distance:
             relative_distance[id] = {frame_num: {}}
@@ -119,6 +122,8 @@ while videoCap.isOpened():
     
     for i in range(0, len(people_boxes)): # runs after all poses have been calculated
         box = people_boxes[i]
+        if box.id == None:
+            continue
         id = int(box.id.item())
 
         if box.conf[0] > 0.4:
@@ -155,25 +160,25 @@ while videoCap.isOpened():
             
             # if mediapipe detected both left and right foot
             if all(x > 0 for x in left_foot_pos[id]) and all(x > 0 for x in right_foot_pos[id]):
-                relative_distance[id][frame_num]['foot-pos'] = (left_foot_pos[id][1] + right_foot_pos[id][1]) / 2
+                relative_distance[id][frame_num]['foot-pos'] = max(left_foot_pos[id][1], right_foot_pos[id][1])
             elif all(x > 0 for x in left_foot_pos[id]):
                 relative_distance[id][frame_num]['foot-pos'] = left_foot_pos[id][1]
             elif all(x > 0 for x in right_foot_pos[id]):
                 relative_distance[id][frame_num]['foot-pos'] = right_foot_pos[id][1]
 
-    cv2.imshow('frame', frame)
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
-
     map = np.zeros((frame.shape[0], frame.shape[1], 3), dtype=np.uint8)
     for object in relative_distance:
         try:
-            cv2.circle(map, (frame.shape[0], int(relative_distance[object][frame_num]['depth-estimation']/255*frame.shape[1])), 80, (255, 255, 255), 2)
+            cv2.circle(map, (100, int(relative_distance[object][frame_num]['depth-estimation']/255*frame.shape[1])), 80, (255, 255, 255), 2)
         except:
             pass
     cv2.imshow('position', map)
 
+    cv2.imshow('frame', frame)
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
     frame_num += 1
+    print(len(relative_distance))
 
 videoCap.release()
 cv2.destroyAllWindows()
