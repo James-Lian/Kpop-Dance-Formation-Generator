@@ -2,9 +2,12 @@ import cv2
 from ultralytics import YOLO # object tracking
 import mediapipe as mp # pose estimation
 
-from transformers import pipeline # depth detection
+from depth import *
+# from perspective import find_vanishing_point
 from PIL import Image
 import numpy as np
+
+vanishing_point = (562, 391)
 
 def point_in_box(point, p1, p2):
     # comparing each coordinate
@@ -36,9 +39,12 @@ mp_pose = mp.solutions.pose
 pose = mp_pose
 pose = mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5)
 
-pipe = pipeline(task = "depth-estimation", model="depth-anything/Depth-Anything-V2-Small-hf")
+midasObj = Midas(ModelType.MIDAS_SMALL)
+midasObj.useCUDA()
+midasObj.transform()
 
 relative_distance = {}
+horizontal_distance = {} # regardless of perspective
 left_foot_pos = {}
 right_foot_pos = {}
 left_hip_pos = {}
@@ -55,8 +61,7 @@ while videoCap.isOpened():
     # Object detection and visualization code
 
     #depth detection
-    image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-    depth = pipe(image)["depth"]
+    depth = midasObj.predict(frame)
 
     people_boxes = []
     for result in results:
@@ -75,6 +80,10 @@ while videoCap.isOpened():
             relative_distance[id] = {frame_num: {}}
         else:
             relative_distance[id][frame_num] = {}
+        
+        if id not in horizontal_distance:
+            horizontal_distance[id] = {}
+
 
         if box.conf[0] > 0.4:
             [x1, y1, x2, y2] = box.xyxy[0] # floats
@@ -135,8 +144,6 @@ while videoCap.isOpened():
             left_hip_valid = True
             right_hip_valid = True
 
-            print(left_hip_pos)
-
             for j in range(0, len(people_boxes)):
                 j_box = people_boxes[j]
                 if j_box.conf[0] > 0.4:
@@ -151,25 +158,46 @@ while videoCap.isOpened():
                         break
             
             if left_hip_valid and right_hip_valid:
-                relative_distance[id][frame_num]['depth-estimation'] = depth.getpixel(tuple(sum(y) / len(y) for y in zip(right_hip_pos[id], left_hip_pos[id])))
+                relative_distance[id][frame_num]['depth-estimation'] = depth[int((left_hip_pos[id][1]+right_hip_pos[id][1])/2)][int((left_hip_pos[id][0]+right_hip_pos[id][0])/2)]
                 
             if left_hip_valid:
-                relative_distance[id][frame_num]['depth-estimation'] = depth.getpixel(left_hip_pos[id])
+                relative_distance[id][frame_num]['depth-estimation'] = depth[left_hip_pos[id][1]][left_hip_pos[id][0]]
             elif right_hip_valid:
-                relative_distance[id][frame_num]['depth-estimation'] = depth.getpixel(right_hip_pos[id])
+                relative_distance[id][frame_num]['depth-estimation'] = depth[right_hip_pos[id][1]][right_hip_pos[id][0]]
             
             # if mediapipe detected both left and right foot
             if all(x > 0 for x in left_foot_pos[id]) and all(x > 0 for x in right_foot_pos[id]):
                 relative_distance[id][frame_num]['foot-pos'] = max(left_foot_pos[id][1], right_foot_pos[id][1])
+
+                # people further away from the camera appear closer to the center even though they may be at the same x-coordinate
+                # drawing a line from vanishing point to the feet, where this line intersects with the bottom of the frame is the person's world x-coordinates
+                # (y2-y1) / (x2-x1)
+                m = (vanishing_point[1] - max(left_foot_pos[id][1], right_foot_pos[id][1])) / (vanishing_point[0] - (left_foot_pos[id][0] + right_foot_pos[id][0])/2) 
+                b = vanishing_point[1] - (m * vanishing_point[0])
+                # sub frame.shape[1] as y in y=mx+b
+                x = (frame.shape[1] - b)/m
+                horizontal_distance[id][frame_num] = x
+
             elif all(x > 0 for x in left_foot_pos[id]):
                 relative_distance[id][frame_num]['foot-pos'] = left_foot_pos[id][1]
+
+                m = (vanishing_point[1] - left_foot_pos[id][1]) / (vanishing_point[0] - left_foot_pos[id][0])
+                b = vanishing_point[1] - (m * vanishing_point[0])
+                x = (frame.shape[1] - b)/m
+                horizontal_distance[id][frame_num] = x
+
             elif all(x > 0 for x in right_foot_pos[id]):
                 relative_distance[id][frame_num]['foot-pos'] = right_foot_pos[id][1]
+
+                m = (vanishing_point[1] - right_foot_pos[id][1]) / (vanishing_point[0] - right_foot_pos[id][0])
+                b = vanishing_point[1] - (m * vanishing_point[0])
+                x = (frame.shape[1] - b)/m
+                horizontal_distance[id][frame_num] = x
 
     map = np.zeros((frame.shape[0], frame.shape[1], 3), dtype=np.uint8)
     for object in relative_distance:
         try:
-            cv2.circle(map, (100, int(relative_distance[object][frame_num]['depth-estimation']/255*frame.shape[1])), 80, (255, 255, 255), 2)
+            cv2.circle(map, (int(horizontal_distance[object][frame_num]/3), int(relative_distance[object][frame_num]['depth-estimation']/255*frame.shape[1])), 80, (255, 255, 255), 2)
         except:
             pass
     cv2.imshow('position', map)
