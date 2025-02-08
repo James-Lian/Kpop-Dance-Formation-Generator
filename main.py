@@ -106,25 +106,25 @@ while videoCap.isOpened():
 
             try:
                 left_foot = pose_results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_FOOT_INDEX]
-                left_foot_pos[id] = (int(left_foot.x * width), int(left_foot.y * height))
+                left_foot_pos[id] = (min(int(left_foot.x * abs(x2-x1)) + x1, width), min(int(left_foot.y * abs(y2-y1)) + y1, height))
             except:
                 left_foot_pos[id] = (-1, -1)
 
             try:
                 right_foot = pose_results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_FOOT_INDEX]
-                right_foot_pos[id] = (int(right_foot.x * width), int(right_foot.y * height))
+                right_foot_pos[id] = (min(int(right_foot.x * abs(x2-x1)) + x1, width), min(int(right_foot.y * abs(y2-y1)) + y1, height))
             except:
                 right_foot_pos[id] = (-1, -1)
 
             try:
                 left_hip = pose_results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_HIP]
-                left_hip_pos[id] = (int(left_hip.x * width), int(left_hip.y * height))
+                left_hip_pos[id] = (min(int(left_hip.x * abs(x2-x1)) + x1, width), min(int(left_hip.y * abs(y2-y1)) + y1, height))
             except:
                 left_hip_pos[id] = (-1, -1)
 
             try:
                 right_hip = pose_results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_HIP]
-                right_hip_pos[id] = (int(right_hip.x * width), int(right_hip.y * height))
+                right_hip_pos[id] = (min(int(right_hip.x * abs(x2-x1)) + x1, width), min(int(right_hip.y * abs(y2-y1)) + y1, height))
             except:
                 right_hip_pos[id] = (-1, -1)
 
@@ -158,16 +158,16 @@ while videoCap.isOpened():
                         break
             
             if left_hip_valid and right_hip_valid:
-                relative_distance[id][frame_num]['depth-estimation'] = depth[int((left_hip_pos[id][1]+right_hip_pos[id][1])/2)][int((left_hip_pos[id][0]+right_hip_pos[id][0])/2)]
+                relative_distance[id][frame_num]['depth-estimation'] = depth[int((left_hip_pos[id][1]+right_hip_pos[id][1])/2)-1][int((left_hip_pos[id][0]+right_hip_pos[id][0])/2)-1]
                 
             if left_hip_valid:
-                relative_distance[id][frame_num]['depth-estimation'] = depth[left_hip_pos[id][1]][left_hip_pos[id][0]]
+                relative_distance[id][frame_num]['depth-estimation'] = depth[left_hip_pos[id][1]-1][left_hip_pos[id][0]-1]
             elif right_hip_valid:
-                relative_distance[id][frame_num]['depth-estimation'] = depth[right_hip_pos[id][1]][right_hip_pos[id][0]]
+                relative_distance[id][frame_num]['depth-estimation'] = depth[right_hip_pos[id][1]-1][right_hip_pos[id][0]-1]
             
             # if mediapipe detected both left and right foot
             if all(x > 0 for x in left_foot_pos[id]) and all(x > 0 for x in right_foot_pos[id]):
-                relative_distance[id][frame_num]['foot-pos'] = max(left_foot_pos[id][1], right_foot_pos[id][1])
+                relative_distance[id][frame_num]['foot-pos'] = max(left_foot_pos[id][1], right_foot_pos[id][1]) - 1
 
                 # people further away from the camera appear closer to the center even though they may be at the same x-coordinate
                 # drawing a line from vanishing point to the feet, where this line intersects with the bottom of the frame is the person's world x-coordinates
